@@ -2,6 +2,8 @@
 
 let Service, Characteristic;
 let request = require("request").defaults({json: true});
+const util = require('util');
+const exec = util.promisify(require('child_process').exec);
 
 module.exports.VolumioAccessory;
 
@@ -16,13 +18,16 @@ module.exports = function (homebridge) {
     constructor(log, config) {
         this.log = log;
         this.name = config.name;
-        let serverName = (config.server || "http://volumio.local").toLowerCase();
-        this.stateUrl = serverName + "/api/v1/getstate";
-        this.playCommandUrl = serverName + "/api/v1/commands/?cmd=play";
-        this.stopCommandUrl = serverName + "/api/v1/commands/?cmd=stop";
-        this.volumeCommandUrl = serverName + "/api/v1/commands/?cmd=volume&volume=";
-
-        this.log("stateUrl = " + this.stateUrl);
+        this.isLocal = false;
+        if(!config.isLocal){
+            let serverName = (config.server || "http://volumio.local").toLowerCase();
+            this.stateUrl = serverName + "/api/v1/getstate";
+            this.playCommandUrl = serverName + "/api/v1/commands/?cmd=play";
+            this.stopCommandUrl = serverName + "/api/v1/commands/?cmd=stop";
+            this.volumeCommandUrl = serverName + "/api/v1/commands/?cmd=volume&volume=";
+        }else{
+            this.isLocal = true;
+        }
     }
 
     getServices() {
@@ -52,20 +57,35 @@ module.exports = function (homebridge) {
     }
 
     getPlayState(callback) {
-        request(this.stateUrl, (error, response, body) => {
-            if (error) {
-                this.log("getPlayState() failed: %s", error.message);
-                callback(error);
-            }
-            else if (response.statusCode !== 200) {
-                this.log("getPlayState() request returned http error: %s", response.statusCode);
-                callback(new Error("getMuteState() returned http error " + response.statusCode));
-            }
-            else {
-                callback(null, body.status === 'play');
-            }
-        });
+        if(this.isLocal){
+            getPlayStateLocal(callback);
+        }else{
+            request(this.stateUrl, (error, response, body) => {
+                if (error) {
+                    this.log("getPlayState() failed: %s", error.message);
+                    callback(error);
+                }
+                else if (response.statusCode !== 200) {
+                    this.log("getPlayState() request returned http error: %s", response.statusCode);
+                    callback(new Error("getMuteState() returned http error " + response.statusCode));
+                }
+                else {
+                    callback(null, body.status === 'play');
+                }
+            });
+        }
     }
+     
+     async getPlayStateLocal(callback){
+      try {
+          const { stdout, stderr } = await exec('volumio state');
+          console.log('stdout:', stdout);
+          console.log('stderr:', stderr);
+          callback(null, stdout.status === 'play')
+      }catch (err)=>{
+         callback(err);
+      };
+     }
 
     setPlayState(on, callback) {
         let url = on ? this.playCommandUrl : this.stopCommandUrl;
